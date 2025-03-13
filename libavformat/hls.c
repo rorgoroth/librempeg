@@ -732,46 +732,6 @@ static int open_url(AVFormatContext *s, AVIOContext **pb, const char *url,
     return ret;
 }
 
-static int test_segment(AVFormatContext *s, const AVInputFormat *in_fmt, struct playlist *pls, struct segment *seg)
-{
-    HLSContext *c = s->priv_data;
-    int matchA = 3;
-    int matchF = 0;
-
-    if (!c->extension_picky)
-        return 0;
-
-    if (strcmp(c->allowed_extensions, "ALL"))
-        matchA =      av_match_ext    (seg->url, c->allowed_extensions)
-                 + 2*(ff_match_url_ext(seg->url, c->allowed_extensions) > 0);
-
-    if (!matchA) {
-        av_log(s, AV_LOG_ERROR, "URL %s is not in allowed_extensions\n", seg->url);
-        return AVERROR_INVALIDDATA;
-    }
-
-    if (in_fmt) {
-        if (in_fmt->extensions) {
-            matchF =      av_match_ext(    seg->url, in_fmt->extensions)
-                     + 2*(ff_match_url_ext(seg->url, in_fmt->extensions) > 0);
-            if(av_match_name("mp4", in_fmt->name)) {
-                matchF |=      av_match_ext(    seg->url, "ts,m2t,m2ts,mts,mpg,m4s,mpeg,mpegts")
-                          + 2*(ff_match_url_ext(seg->url, "ts,m2t,m2ts,mts,mpg,m4s,mpeg,mpegts") > 0);
-            }
-        } else if (!strcmp(in_fmt->name, "mpegts")) {
-            matchF =      av_match_ext(    seg->url, "ts,m2t,m2ts,mts,mpg,m4s,mpeg,mpegts")
-                     + 2*(ff_match_url_ext(seg->url, "ts,m2t,m2ts,mts,mpg,m4s,mpeg,mpegts") > 0);
-        }
-
-        if (!(matchA & matchF)) {
-            av_log(s, AV_LOG_ERROR, "detected format %s extension %s mismatches allowed extensions in url %s\n", in_fmt->name, in_fmt->extensions ? in_fmt->extensions : "none", seg->url);
-            return AVERROR_INVALIDDATA;
-        }
-    }
-
-    return 0;
-}
-
 static int parse_playlist(HLSContext *c, const char *url,
                           struct playlist *pls, AVIOContext *in)
 {
@@ -1030,13 +990,6 @@ static int parse_playlist(HLSContext *c, const char *url,
                     goto fail;
                 }
 
-                ret = test_segment(c->ctx, pls->ctx ? pls->ctx->iformat : NULL, pls, seg);
-                if (ret < 0) {
-                    av_free(seg->url);
-                    av_free(seg->key);
-                    av_free(seg);
-                    goto fail;
-                }
 
                 if (duration < 0.001 * AV_TIME_BASE) {
                     av_log(c->ctx, AV_LOG_WARNING, "Cannot get correct #EXTINF value of segment %s,"
@@ -2163,10 +2116,6 @@ static int hls_read_header(AVFormatContext *s)
             pls->ctx->interrupt_callback = s->interrupt_callback;
             url = av_strdup(pls->segments[0]->url);
             ret = av_probe_input_buffer(&pls->pb.pub, &in_fmt, url, NULL, 0, 0);
-
-            for (int n = 0; n < pls->n_segments; n++)
-                if (ret >= 0)
-                    ret = test_segment(s, in_fmt, pls, pls->segments[n]);
 
             if (ret < 0) {
                 /* Free the ctx - it isn't initialized properly at this point,
